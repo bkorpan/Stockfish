@@ -1788,6 +1788,62 @@ moves_loop: // When in check, search starts here
     return best;
   }
 
+//=============================== FTBFS stuff ======================================
+
+class Node {
+private:
+
+  // Use qsearch to put initial valuations on edges
+  void init_edge_values(Position& pos, Stack* ss) {
+    for (int i = 0; i < numEdges; i++) {
+      StateInfo st;
+      pos.do_move(moves[i], st);
+      values[i] = qsearch<NonPV>(pos, ss, -VALUE_INFINITE, VALUE_INFINITE);
+      pos.undo_move(moves[i]);
+    }
+  }
+
+public:
+
+  int numEdges;
+
+  Node** edges;
+  Value* values;
+  Move* moves;
+
+  Node(Position &pos, Stack* ss) {
+    // Generate legal moves from this node
+    ExtMove moves_array[121];
+    ExtMove* moves_start = moves_array;
+    ExtMove* moves_end = NULL;
+    generate<LEGAL>(pos, moves_start);
+
+    // Set values and do allocations
+    numEdges = (int)(moves_end - moves_start) / sizeof(ExtMove);
+
+    // Do allocations
+    edges = (Node**)malloc(numEdges * sizeof(Node*));
+    values = (Value*)malloc(numEdges * sizeof(Value));
+    moves = (Move*)malloc(numEdges * sizeof(Move));
+
+    // Initialize arrays
+    memset(edges, 0, numEdges * sizeof(Node*));
+    init_edge_values(pos, ss);
+    for (int i = 0; i < numEdges; i++) {
+      moves[i] = moves_array[i].move;
+    }
+  }
+
+  ~Node() {
+    for (int i = 0; i < numEdges; i++) {
+      delete edges[i];
+    }
+    free(edges);
+    free(values);
+    free(moves);
+  }
+};
+
 } // namespace
 
 
