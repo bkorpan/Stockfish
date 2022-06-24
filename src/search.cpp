@@ -1792,26 +1792,43 @@ moves_loop: // When in check, search starts here
 
 class Node {
 private:
+  int num_edges;
 
-  // Use qsearch to put initial valuations on edges
-  void init_edge_values(Position& pos, Stack* ss) {
-    for (int i = 0; i < numEdges; i++) {
-      StateInfo st;
-      pos.do_move(moves[i], st);
-      values[i] = qsearch<NonPV>(pos, ss, -VALUE_INFINITE, VALUE_INFINITE);
-      pos.undo_move(moves[i]);
-    }
-  }
-
-public:
-
-  int numEdges;
+  Node* parent;
 
   Node** edges;
   Value* values;
   Move* moves;
 
-  Node(Position &pos, Stack* ss) {
+  // Use qsearch to put initial valuations on edges
+  void init_edge_values(Position& pos) {
+    for (int i = 0; i < num_edges; i++) {
+      StateInfo st;
+      pos.do_move(moves[i], st);
+      values[i] = qsearch<NonPV>(pos, NULL, -VALUE_INFINITE, VALUE_INFINITE);
+      pos.undo_move(moves[i]);
+    }
+  }
+
+  int get_best_idx() {
+    Value best_value = -VALUE_INFINITE;
+    int best_idx = 0;
+    for (int i = 0; i < num_edges; i++) {
+      if (values[i] > best_value) {
+        best_value = values[i];
+        best_idx = i;
+      }
+    }
+    return best_idx;
+  }
+
+  void update_value(Value updated_value) {
+    values[get_best_idx()] = updated_value;
+  }
+
+public:
+
+  Node(Position &pos, Node* parent) {
     // Generate legal moves from this node
     ExtMove moves_array[121];
     ExtMove* moves_start = moves_array;
@@ -1819,30 +1836,122 @@ public:
     generate<LEGAL>(pos, moves_start);
 
     // Set values and do allocations
-    numEdges = (int)(moves_end - moves_start) / sizeof(ExtMove);
+    num_edges = (int)(moves_end - moves_start) / sizeof(ExtMove);
 
     // Do allocations
-    edges = (Node**)malloc(numEdges * sizeof(Node*));
-    values = (Value*)malloc(numEdges * sizeof(Value));
-    moves = (Move*)malloc(numEdges * sizeof(Move));
+    edges = (Node**)malloc(num_edges * sizeof(Node*));
+    values = (Value*)malloc(num_edges * sizeof(Value));
+    moves = (Move*)malloc(num_edges * sizeof(Move));
 
     // Initialize arrays
-    memset(edges, 0, numEdges * sizeof(Node*));
-    init_edge_values(pos, ss);
-    for (int i = 0; i < numEdges; i++) {
+    memset(edges, 0, num_edges * sizeof(Node*));
+    init_edge_values(pos);
+    for (int i = 0; i < num_edges; i++) {
       moves[i] = moves_array[i].move;
     }
+
+    this->parent = parent;
   }
 
   ~Node() {
-    for (int i = 0; i < numEdges; i++) {
+    for (int i = 0; i < num_edges; i++) {
       delete edges[i];
     }
     free(edges);
     free(values);
     free(moves);
   }
+
+  Move get_best_move() {
+    return moves[get_best_idx()];
+  }
+
+  Node* expand_best(Position &pos) {
+    StateInfo st;
+    pos.do_move(moves[get_best_idx()], st);
+    return new Node(pos, this);
+  }
+
+  Value get_value() {
+    return values[get_best_idx()];
+  }
+
+  Value get_second_best_value() {
+    Value best_value = -VALUE_INFINITE;
+    Value second_best_value = -VALUE_INFINITE;
+    for (int i = 0; i < num_edges; i++) {
+      if (values[i] > best_value) {
+        second_best_value = best_value;
+        best_value = values[i];
+      } else if (values[i] > second_best_value) {
+        second_best_value = values[i];
+      }
+    }
+    return second_best_value;
+  }
+
+  Node* backtrack(Position &pos, Value updated_value) {
+    pos.undo_move(moves[get_best_idx()]);
+    parent->update_value(updated_value);
+    return parent;
+  }
+
+  Node* get_best_child() {
+    return edges[get_best_idx()];
+  }
 };
+
+void swap_and_negate(Value &a, Value &b) {
+  Value tmp = -b;
+  b = -a;
+  a = tmp;
+}
+
+Value ftbfs(Position& pos, int n) {
+  // Root node
+  Node* root = new Node(pos, NULL);
+  Node* node = root;
+
+  // Initialize values
+  Value value = -VALUE_INFINITE;
+  Value alpha = -VALUE_INFINITE;
+  Value beta = VALUE_INFINITE;
+  Value epsilon = static_cast<Value>(100);
+
+  int d = 0;
+
+  // Search loop
+  for (int i = 0; i < n; i++) {
+    // Expand best move of current best node
+    node = node->expand_best(pos);
+    value = node->get_value();
+    d++;
+
+    // Backtrack if needed, otherwise update alpha
+    if (value > beta + epsilon || value < alpha - epsilon) {
+      while (value != alpha) {
+        value = -value;
+        swap_and_negate(alpha, beta);
+        node = node->backtrack(pos, value);
+        if (node->get_value() == alpha) {
+          value = alpha;
+        }
+        d--;
+      }
+      alpha = -VALUE_INFINITE;
+      Node* path = root;
+      for (int k = 0; path != node; path = path->get_best_child(), k++) {
+        if ((k & 1) == (d & 1)) {
+          alpha = std::max(alpha, path->get_value());
+        }
+      }
+    } else if (alpha < node->get_second_best_value()) {
+      alpha = node->get_second_best_value();
+    }
+  }
+
+  return value;
+}
 
 } // namespace
 
