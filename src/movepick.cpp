@@ -303,4 +303,203 @@ top:
   return MOVE_NONE; // Silence warning
 }
 
+//===================================== FTBFS stuff ============================================
+
+MovePicker_ftbfs::MovePicker_ftbfs(const Position& p, Depth d, Square rs)
+           : pos(p), recaptureSquare(rs), depth(d)
+{
+  assert(d <= 0);
+
+  stage = (pos.checkers() ? EVASION_TT : QSEARCH_TT) + 1;
+}
+
+template<GenType Type>
+void MovePicker_ftbfs::score() {
+
+  static_assert(Type == CAPTURES || Type == QUIETS || Type == EVASIONS, "Wrong type");
+
+  Bitboard threatened, threatenedByPawn, threatenedByMinor, threatenedByRook;
+  if constexpr (Type == QUIETS)
+  {
+      Color us = pos.side_to_move();
+      // squares threatened by pawns
+      threatenedByPawn  = pos.attacks_by<PAWN>(~us);
+      // squares threatened by minors or pawns
+      threatenedByMinor = pos.attacks_by<KNIGHT>(~us) | pos.attacks_by<BISHOP>(~us) | threatenedByPawn;
+      // squares threatened by rooks, minors or pawns
+      threatenedByRook  = pos.attacks_by<ROOK>(~us) | threatenedByMinor;
+
+      // pieces threatened by pieces of lesser material value
+      threatened =  (pos.pieces(us, QUEEN) & threatenedByRook)
+                  | (pos.pieces(us, ROOK)  & threatenedByMinor)
+                  | (pos.pieces(us, KNIGHT, BISHOP) & threatenedByPawn);
+  }
+  else
+  {
+      // Silence unused variable warnings
+      (void) threatened;
+      (void) threatenedByPawn;
+      (void) threatenedByMinor;
+      (void) threatenedByRook;
+  }
+
+  for (auto& m : *this)
+      if constexpr (Type == CAPTURES)
+          m.value =  6 * int(PieceValue[MG][pos.piece_on(to_sq(m))]);
+
+      else if constexpr (Type == QUIETS)
+          m.value =        (threatened & from_sq(m) ?
+                           (type_of(pos.moved_piece(m)) == QUEEN && !(to_sq(m) & threatenedByRook)  ? 50000
+                          : type_of(pos.moved_piece(m)) == ROOK  && !(to_sq(m) & threatenedByMinor) ? 25000
+                          :                                         !(to_sq(m) & threatenedByPawn)  ? 15000
+                          :                                                                           0)
+                          :                                                                           0);
+
+      else // Type == EVASIONS
+      {
+          if (pos.capture(m))
+              m.value =  PieceValue[MG][pos.piece_on(to_sq(m))]
+                       - Value(type_of(pos.moved_piece(m)));
+          else
+              m.value = - (1 << 28);
+      }
+}
+
+template<MovePicker_ftbfs::PickType T, typename Pred>
+Move MovePicker_ftbfs::select(Pred filter) {
+
+  while (cur < endMoves)
+  {
+      if (T == Best)
+          std::swap(*cur, *std::max_element(cur, endMoves));
+
+      if (filter())
+          return *cur++;
+
+      cur++;
+  }
+  return MOVE_NONE;
+}
+
+Move MovePicker_ftbfs::next_move(bool skipQuiets) {
+
+top:
+  switch (stage) {
+
+  case MAIN_TT:
+  case EVASION_TT:
+  case QSEARCH_TT:
+  case PROBCUT_TT:
+      ++stage;
+      goto top;
+
+  case CAPTURE_INIT:
+  case PROBCUT_INIT:
+  case QCAPTURE_INIT:
+      cur = endBadCaptures = moves;
+      endMoves = generate<CAPTURES>(pos, cur);
+
+      score<CAPTURES>();
+      partial_insertion_sort(cur, endMoves, -3000 * depth);
+      ++stage;
+      goto top;
+
+  case GOOD_CAPTURE:
+      if (select<Next>([&](){
+                       return pos.see_ge(*cur, Value(-69 * cur->value / 1024)) ?
+                              // Move losing capture to endBadCaptures to be tried later
+                              true : (*endBadCaptures++ = *cur, false); }))
+          return *(cur - 1);
+
+      // Prepare the pointers to loop over the refutations array
+      cur = std::begin(refutations);
+      endMoves = std::end(refutations);
+
+      // If the countermove is the same as a killer, skip it
+      if (   refutations[0].move == refutations[2].move
+          || refutations[1].move == refutations[2].move)
+          --endMoves;
+
+      ++stage;
+      [[fallthrough]];
+
+  case REFUTATION:
+      if (select<Next>([&](){ return    *cur != MOVE_NONE
+                                    && !pos.capture(*cur)
+                                    &&  pos.pseudo_legal(*cur); }))
+          return *(cur - 1);
+      ++stage;
+      [[fallthrough]];
+
+  case QUIET_INIT:
+      if (!skipQuiets)
+      {
+          cur = endBadCaptures;
+          endMoves = generate<QUIETS>(pos, cur);
+
+          score<QUIETS>();
+          partial_insertion_sort(cur, endMoves, -3000 * depth);
+      }
+
+      ++stage;
+      [[fallthrough]];
+
+  case QUIET:
+      if (   !skipQuiets
+          && select<Next>([&](){return   *cur != refutations[0].move
+                                      && *cur != refutations[1].move
+                                      && *cur != refutations[2].move;}))
+          return *(cur - 1);
+
+      // Prepare the pointers to loop over the bad captures
+      cur = moves;
+      endMoves = endBadCaptures;
+
+      ++stage;
+      [[fallthrough]];
+
+  case BAD_CAPTURE:
+      return select<Next>([](){ return true; });
+
+  case EVASION_INIT:
+      cur = moves;
+      endMoves = generate<EVASIONS>(pos, cur);
+
+      score<EVASIONS>();
+      ++stage;
+      [[fallthrough]];
+
+  case EVASION:
+      return select<Best>([](){ return true; });
+
+  case PROBCUT:
+      return select<Next>([&](){ return pos.see_ge(*cur, threshold); });
+
+  case QCAPTURE:
+      if (select<Next>([&](){ return   depth > DEPTH_QS_RECAPTURES
+                                    || to_sq(*cur) == recaptureSquare; }))
+          return *(cur - 1);
+
+      // If we did not find any move and we do not try checks, we have finished
+      if (depth != DEPTH_QS_CHECKS)
+          return MOVE_NONE;
+
+      ++stage;
+      [[fallthrough]];
+
+  case QCHECK_INIT:
+      cur = moves;
+      endMoves = generate<QUIET_CHECKS>(pos, cur);
+
+      ++stage;
+      [[fallthrough]];
+
+  case QCHECK:
+      return select<Next>([](){ return true; });
+  }
+
+  assert(false);
+  return MOVE_NONE; // Silence warning
+}
+
 } // namespace Stockfish

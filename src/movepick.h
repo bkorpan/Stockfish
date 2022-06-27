@@ -150,6 +150,33 @@ private:
   ExtMove moves[MAX_MOVES];
 };
 
+//========================================= FTBFS stuff ==============================================
+
+class MovePicker_ftbfs {
+
+  enum PickType { Next, Best };
+
+public:
+  MovePicker_ftbfs(const MovePicker_ftbfs&) = delete;
+  MovePicker_ftbfs& operator=(const MovePicker_ftbfs&) = delete;
+  MovePicker_ftbfs(const Position&, Depth, Square);
+  Move next_move(bool skipQuiets = false);
+
+private:
+  template<PickType T, typename Pred> Move select(Pred);
+  template<GenType> void score();
+  ExtMove* begin() { return cur; }
+  ExtMove* end() { return endMoves; }
+
+  const Position& pos;
+  ExtMove refutations[3], *cur, *endMoves, *endBadCaptures;
+  int stage;
+  Square recaptureSquare;
+  Value threshold;
+  Depth depth;
+  ExtMove moves[MAX_MOVES];
+};
+
 } // namespace Stockfish
 
 #endif // #ifndef MOVEPICK_H_INCLUDED

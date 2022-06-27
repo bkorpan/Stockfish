@@ -1791,7 +1791,7 @@ moves_loop: // When in check, search starts here
 //=============================== FTBFS stuff ======================================
 
   template <NodeType nodeType>
-  Value qsearch_ftbs(Position& pos, Value alpha, Value beta, Depth depth, int ply) {
+  Value qsearch_ftbfs(Position& pos, Value alpha, Value beta, Depth depth, int ply, Move& prevMove) {
 
     static_assert(nodeType != Root);
     constexpr bool PvNode = nodeType == PV;
@@ -1800,19 +1800,14 @@ moves_loop: // When in check, search starts here
     assert(PvNode || (alpha == beta - 1));
     assert(depth <= 0);
 
-    Move pv[MAX_PLY+1];
     StateInfo st;
     ASSERT_ALIGNED(&st, Eval::NNUE::CacheLineSize);
 
-    TTEntry* tte;
-    Key posKey;
-    Move ttMove, move, bestMove;
-    Depth ttDepth;
-    Value bestValue, value, ttValue, futilityValue, futilityBase;
-    bool pvHit, givesCheck, capture;
+    Move move, bestMove;
+    Value bestValue, value, futilityValue, futilityBase;
+    bool givesCheck, capture;
     int moveCount;
 
-    Thread* thisThread = pos.this_thread();
     bestMove = MOVE_NONE;
     moveCount = 0;
 
@@ -1823,21 +1818,12 @@ moves_loop: // When in check, search starts here
 
     assert(0 <= ply && ply < MAX_PLY);
 
-    // Decide whether or not to include checks: this fixes also the type of
-    // TT entry depth that we are going to use. Note that in qsearch we use
-    // only two types of depth in TT: DEPTH_QS_CHECKS or DEPTH_QS_NO_CHECKS.
-    ttDepth = pos.checkers() || depth >= DEPTH_QS_CHECKS ? DEPTH_QS_CHECKS
-                                                         : DEPTH_QS_NO_CHECKS;
-
     // Initialize a MovePicker object for the current position, and prepare
     // to search the moves. Because the depth is <= 0 here, only captures,
     // queen promotions, and other checks (only if depth >= DEPTH_QS_CHECKS)
     // will be generated.
-    Square prevSq = to_sq((ss-1)->currentMove);
-    MovePicker mp(pos, ttMove, depth, &thisThread->mainHistory,
-                                      &thisThread->captureHistory,
-                                      NULL,
-                                      prevSq);
+    Square prevSq = to_sq(prevMove);
+    MovePicker_ftbfs mp(pos, depth, prevSq);
 
     int quietCheckEvasions = 0;
 
@@ -1897,7 +1883,7 @@ moves_loop: // When in check, search starts here
 
       // Make and search the move
       pos.do_move(move, st, givesCheck);
-      value = -ftbs_qsearch<PV>(pos, -beta, -alpha, depth - 1, ply);
+      value = -qsearch_ftbfs<PV>(pos, -beta, -alpha, depth - 1, ply, move);
       pos.undo_move(move);
 
       assert(value > -VALUE_INFINITE && value < VALUE_INFINITE);
@@ -1948,7 +1934,7 @@ private:
     for (int i = 0; i < num_edges; i++) {
       StateInfo st;
       pos.do_move(moves[i], st);
-      values[i] = qsearch_ftbs<PV>(pos, -VALUE_INFINITE, VALUE_INFINITE, 0, ply);
+      values[i] = qsearch_ftbfs<PV>(pos, -VALUE_INFINITE, VALUE_INFINITE, 0, ply, moves[i]);
       pos.undo_move(moves[i]);
     }
   }
