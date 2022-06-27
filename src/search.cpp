@@ -2036,7 +2036,7 @@ void swap_and_negate(Value &a, Value &b) {
   a = tmp;
 }
 
-Value ftbfs(Position& pos, int n) {
+Node* ftbfs(Position& pos, int n) {
   // Root node
   Node* root = new Node(pos, NULL, 0);
   Node* node = root;
@@ -2079,7 +2079,7 @@ Value ftbfs(Position& pos, int n) {
     }
   }
 
-  return value;
+  return root;
 }
 
 } // namespace
