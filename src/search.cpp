@@ -2028,6 +2028,15 @@ public:
   Node* get_best_child() {
     return edges[get_best_idx()];
   }
+
+  int get_pv_depth() {
+    Node* best_child = get_best_child();
+    if (best_child != NULL) {
+      return best_child.get_pv_depth() + 1;
+    } else {
+      return 0;
+    }
+  }
 };
 
 void swap_and_negate(Value &a, Value &b) {

@@ -32,7 +32,26 @@ using namespace Stockfish;
 
 int main(int argc, char* argv[]) {
 
-  std::cout << engine_info() << std::endl;
+  char fen[100];
+  int nodes;
+
+  cout << "Position FEN: ";
+  cin >> fen;
+  cout << "Nodes to search: ";
+  cin >> nodes;
+
+  Position pos;
+  StateInfo st;
+  pos.set(fen, false, &st, NULL);
+
+  Node* root = ftbfs(pos, nodes);
+  Move best_move = root.get_best_move();
+
+  cout << "Best move: " << UCI::move(best_move, false) << endl;
+  cout << "Depth of PV: " << root.get_pv_depth() << endl;
+
+
+  /*std::cout << engine_info() << std::endl;
 
   CommandLine::init(argc, argv);
   UCI::init(Options);
@@ -48,6 +67,6 @@ int main(int argc, char* argv[]) {
 
   UCI::loop(argc, argv);
 
-  Threads.set(0);
+  Threads.set(0);*/
   return 0;
 }
