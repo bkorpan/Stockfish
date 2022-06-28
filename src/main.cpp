@@ -27,8 +27,10 @@
 #include "thread.h"
 #include "tt.h"
 #include "uci.h"
+#include "ftbfs.h"
 
 using namespace Stockfish;
+using namespace std;
 
 int main(int argc, char* argv[]) {
 
@@ -40,15 +42,17 @@ int main(int argc, char* argv[]) {
   cout << "Nodes to search: ";
   cin >> nodes;
 
+  cout << "ass\n";
+
   Position pos;
   StateInfo st;
   pos.set(fen, false, &st, NULL);
 
   Node* root = ftbfs(pos, nodes);
-  Move best_move = root.get_best_move();
+  Move best_move = root->get_best_move();
 
   cout << "Best move: " << UCI::move(best_move, false) << endl;
-  cout << "Depth of PV: " << root.get_pv_depth() << endl;
+  cout << "Depth of PV: " << root->get_pv_depth() << endl;
 
 
   /*std::cout << engine_info() << std::endl;
