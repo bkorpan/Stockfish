@@ -42,6 +42,28 @@ template <NodeType nodeType>
 
     assert(0 <= ply && ply < MAX_PLY);
 
+    // Evaluate the position statically
+    if (pos.checkers())
+    {
+        bestValue = futilityBase = -VALUE_INFINITE;
+    }
+    else
+    {
+        // In case of null move search use previous static eval with a different sign
+        bestValue = evaluate(pos);
+
+        // Stand pat. Return immediately if static value is at least beta
+        if (bestValue >= beta)
+        {
+            return bestValue;
+        }
+
+        if (PvNode && bestValue > alpha)
+            alpha = bestValue;
+
+        futilityBase = bestValue + 118;
+    }
+
     // Initialize a MovePicker object for the current position, and prepare
     // to search the moves. Because the depth is <= 0 here, only captures,
     // queen promotions, and other checks (only if depth >= DEPTH_QS_CHECKS)
@@ -107,7 +129,7 @@ template <NodeType nodeType>
 
       // Make and search the move
       pos.do_move(move, st, givesCheck);
-      value = -qsearch_ftbfs<PV>(pos, -beta, -alpha, depth - 1, ply, move);
+      value = -qsearch_ftbfs<PV>(pos, -beta, -alpha, depth - 1, ply + 1, move);
       pos.undo_move(move);
 
       assert(value > -VALUE_INFINITE && value < VALUE_INFINITE);
@@ -150,15 +172,17 @@ private:
   Node* parent;
 
   Node** edges;
-  Value* values;
   Move* moves;
+  Value* values;
+
+  StateInfo stateInfo;
 
   // Use qsearch to put initial valuations on edges
   void init_edge_values(Position& pos, int ply) {
     for (int i = 0; i < num_edges; i++) {
       StateInfo st;
       pos.do_move(moves[i], st);
-      values[i] = qsearch_ftbfs<PV>(pos, -VALUE_INFINITE, VALUE_INFINITE, 0, ply, moves[i]);
+      values[i] = -qsearch_ftbfs<PV>(pos, -VALUE_INFINITE, VALUE_INFINITE, 0, ply + 1, moves[i]);
       pos.undo_move(moves[i]);
     }
   }
@@ -185,23 +209,22 @@ public:
     // Generate legal moves from this node
     ExtMove moves_array[121];
     ExtMove* moves_start = moves_array;
-    ExtMove* moves_end = NULL;
-    generate<LEGAL>(pos, moves_start);
+    ExtMove* moves_end = generate<LEGAL>(pos, moves_start);
 
     // Set values and do allocations
-    num_edges = (int)(moves_end - moves_start) / sizeof(ExtMove);
+    num_edges = (int)(moves_end - moves_start);
 
     // Do allocations
     edges = (Node**)malloc(num_edges * sizeof(Node*));
-    values = (Value*)malloc(num_edges * sizeof(Value));
     moves = (Move*)malloc(num_edges * sizeof(Move));
+    values = (Value*)malloc(num_edges * sizeof(Value));
 
     // Initialize arrays
     memset(edges, 0, num_edges * sizeof(Node*));
-    init_edge_values(pos, ply);
     for (int i = 0; i < num_edges; i++) {
       moves[i] = moves_array[i].move;
     }
+    init_edge_values(pos, ply);
 
     this->parent = parent;
   }
@@ -220,9 +243,12 @@ public:
   }
 
   Node* expand_best(Position &pos, int ply) {
-    StateInfo st;
-    pos.do_move(moves[get_best_idx()], st);
-    return new Node(pos, this, ply);
+    const int best_idx = get_best_idx();
+    pos.do_move(moves[best_idx], stateInfo);
+    if (edges[best_idx] == NULL) {
+      edges[best_idx] = new Node(pos, this, ply);
+    }
+    return edges[best_idx];
   }
 
   Value get_value() {
@@ -244,7 +270,7 @@ public:
   }
 
   Node* backtrack(Position &pos, Value updated_value) {
-    pos.undo_move(moves[get_best_idx()]);
+    pos.undo_move(parent->get_best_move());
     parent->update_value(updated_value);
     return parent;
   }
@@ -263,33 +289,35 @@ public:
   }
 };
 
-void swap_and_negate(Value &a, Value &b) {
+void swap_and_negate(Value& a, Value& b) {
   Value tmp = -b;
   b = -a;
   a = tmp;
 }
 
-Node* ftbfs(Position& pos, int n) {
+Node* ftbfs(Position& pos, const int n, int& maxDepth) {
   // Root node
   Node* root = new Node(pos, NULL, 0);
   Node* node = root;
 
   // Initialize values
-  Value value = -VALUE_INFINITE;
-  Value alpha = -VALUE_INFINITE;
+  Value value = root->get_value();
+  Value alpha = root->get_second_best_value();
   Value beta = VALUE_INFINITE;
-  Value epsilon = static_cast<Value>(100);
+  Value epsilon = static_cast<Value>(160);
 
   int d = 0;
 
   // Search loop
   for (int i = 0; i < n; i++) {
     // Expand best move of current best node
+    d++;
     node = node->expand_best(pos, d);
     value = node->get_value();
-    d++;
+    swap_and_negate(alpha, beta);
+    maxDepth = std::max(maxDepth, d);
 
-    // Backtrack if needed, otherwise update alpha
+    // Backtrack if needed
     if (value > beta + epsilon || value < alpha - epsilon) {
       while (value != alpha) {
         value = -value;
@@ -301,17 +329,18 @@ Node* ftbfs(Position& pos, int n) {
         d--;
       }
       alpha = -VALUE_INFINITE;
-      Node* path = root;
-      for (int k = 0; path != node; path = path->get_best_child(), k++) {
-        if ((k & 1) == (d & 1)) {
-          alpha = std::max(alpha, path->get_value());
-        }
+      beta = VALUE_INFINITE;
+      for (Node* path = root; path != node; path = path->get_best_child()) {
+        alpha = std::max(alpha, path->get_second_best_value());
+        swap_and_negate(alpha, beta);
       }
-    } else if (alpha < node->get_second_best_value()) {
+    }
+
+    // Update alpha
+    if (alpha < node->get_second_best_value()) {
       alpha = node->get_second_best_value();
     }
   }
 
   return root;
 }
-
