@@ -32,6 +32,8 @@ template <NodeType nodeType>
     bool givesCheck, capture;
     int moveCount;
 
+    value = -VALUE_INFINITE;
+    bestValue = -VALUE_INFINITE;
     bestMove = MOVE_NONE;
     moveCount = 0;
 
@@ -252,7 +254,11 @@ public:
   }
 
   Value get_value() {
-    return values[get_best_idx()];
+    if (num_edges > 0) {
+      return values[get_best_idx()];
+    } else {
+      return -parent->get_value();
+    }
   }
 
   Value get_second_best_value() {
@@ -280,12 +286,19 @@ public:
   }
 
   int get_pv_depth() {
-    Node* best_child = get_best_child();
-    if (best_child != NULL) {
-      return best_child->get_pv_depth() + 1;
+    if (num_edges > 0) {
+      Node* best_child = get_best_child();
+      if (best_child != NULL)
+        return best_child->get_pv_depth() + 1;
+      else
+        return 0;
     } else {
       return 0;
     }
+  }
+
+  int get_num_edges() {
+    return num_edges;
   }
 };
 
@@ -304,7 +317,7 @@ Node* ftbfs(Position& pos, const int n, int& maxDepth) {
   Value value = root->get_value();
   Value alpha = root->get_second_best_value();
   Value beta = VALUE_INFINITE;
-  Value epsilon = static_cast<Value>(160);
+  Value epsilon = static_cast<Value>(0);
 
   int d = 0;
 
@@ -312,7 +325,11 @@ Node* ftbfs(Position& pos, const int n, int& maxDepth) {
   for (int i = 0; i < n; i++) {
     // Expand best move of current best node
     d++;
-    node = node->expand_best(pos, d);
+    if (!node->get_num_edges()) {
+      return root;
+    } else {
+      node = node->expand_best(pos, d);
+    }
     value = node->get_value();
     swap_and_negate(alpha, beta);
     maxDepth = std::max(maxDepth, d);
