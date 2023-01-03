@@ -337,12 +337,9 @@ Node* ftbfs(Position& pos, const int n, int& maxDepth) {
     // Backtrack if needed
     if (value > beta + epsilon || value < alpha - epsilon) {
       while (value != alpha) {
-        value = -value;
         swap_and_negate(alpha, beta);
-        node = node->backtrack(pos, value);
-        if (node->get_value() == alpha) {
-          value = alpha;
-        }
+        node = node->backtrack(pos, -value);
+        value = node->get_value();
         d--;
       }
       alpha = -VALUE_INFINITE;
