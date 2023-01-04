@@ -32,6 +32,8 @@
 #include "search.h"
 #include "thread_win32_osx.h"
 
+#include "ftbfs.h"
+
 namespace Stockfish {
 
 /// Thread class keeps together all the thread-related stuff. We use
@@ -66,6 +68,7 @@ public:
   Color nmpColor;
   Value bestValue, optimism[COLOR_NB];
 
+  Node* root;
   Position rootPos;
   StateInfo rootState;
   Search::RootMoves rootMoves;

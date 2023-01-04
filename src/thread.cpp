@@ -207,6 +207,7 @@ void ThreadPool::start_thinking(Position& pos, StateListPtr& states,
       th->rootDepth = th->completedDepth = 0;
       th->rootMoves = rootMoves;
       th->rootPos.set(pos.fen(), pos.is_chess960(), &th->rootState, th);
+      th->root = new Node(pos, NULL, 0);
       th->rootState = setupStates->back();
   }
 

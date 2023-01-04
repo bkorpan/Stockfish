@@ -29,7 +29,6 @@
 #include "thread.h"
 #include "tt.h"
 #include "uci.h"
-#include "ftbfs.h"
 #include "movegen.h"
 #include "types.h"
 
@@ -37,43 +36,7 @@ using namespace Stockfish;
 using namespace std;
 
 int main(int argc, char* argv[]) {
-  //const char* fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-  string fen;
-  int nodes = 100;
-
-  cout << "Position FEN: ";
-  getline(cin, fen);
-  cout << "Nodes to search: ";
-  cin >> nodes;
-
-  Tune::init();
-  PSQT::init();
-  Bitboards::init();
-  Position::init();
-  Bitbases::init();
-  Endgames::init();
-  Threads.set(1);
-  Search::clear(); // After threads are up
-  Eval::NNUE::init();
-
-  Position pos;
-  StateListPtr states(new std::deque<StateInfo>(1));
-  pos.set(fen, false, &states->back(), Threads.main());
-
-  int maxDepth = 0;
-  uint64_t startTime = clock();
-  Node* root = ftbfs(pos, nodes, maxDepth);
-  uint64_t timeElapsed = clock() - startTime;
-  Move best_move = root->get_best_move();
-
-  cout << "Best move: " << UCI::move(best_move, false) << endl;
-  cout << "Depth of PV: " << root->get_pv_depth() << endl;
-  cout << "Max depth searched: " << maxDepth << endl;
-  cout << "Time elapsed: " << timeElapsed * 1e-6 << endl;
-
-  delete root;
-
-  /*std::cout << engine_info() << std::endl;
+  std::cout << engine_info() << std::endl;
 
   CommandLine::init(argc, argv);
   UCI::init(Options);
@@ -89,6 +52,6 @@ int main(int argc, char* argv[]) {
 
   UCI::loop(argc, argv);
 
-  Threads.set(0);*/
+  Threads.set(0);
   return 0;
 }
